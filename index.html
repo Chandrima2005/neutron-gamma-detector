@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>InDEx n/γ Discrimination — SLD Acoustic ML Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow"><span class="dot"></span>InDEx&nbsp;·&nbsp;C₂H₂F₄ Superheated Liquid Detector&nbsp;·&nbsp;Saha Institute of Nuclear Physics</div>
+    <h1>Telling a neutron's<br><span class="hl">acoustic signature</span> from a gamma-ray's.</h1>
+    <p class="lede">Every bubble nucleation in the detector fires an acoustic pulse. Neutrons and gamma-rays leave near-identical amplitudes — but their short-time Fourier spectra don't lie. This dashboard runs the full pipeline end-to-end on the actual 200-event dataset: pulse localization, 512-D spectral feature extraction, and two linear classifiers trained from scratch.</p>
+
+    <div class="hero-scope">
+      <div class="scope-head"><span>CH1 · <span class="tag" id="heroLabel">NEUTRON</span> · scope-1_026.lvm</span><span>Fs = 1.000 MSa/s · Δt = 1 µs · 20 ms window</span></div>
+      <canvas id="heroScope" width="1100" height="150"></canvas>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><b>200</b><span>Waveform events</span></div>
+      <div class="stat"><b>100 / 100</b><span>Neutron / Gamma</span></div>
+      <div class="stat"><b>512-D</b><span>STFT feature vector</span></div>
+      <div class="stat"><b>7:2:1</b><span>Train · Val · Test split</span></div>
+      <div class="stat"><b>30,000</b><span>SGD training epochs</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="physics">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">01</span><h2>Why bother discriminating</h2></div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>The dark matter background problem</h3>
+        <ul>
+          <li>~85% of the universe's matter has never been directly observed — dark matter interacts too weakly with ordinary matter to detect easily.</li>
+          <li>Rare-event searches need detectors sensitive enough to catch a single nuclear recoil, which also makes them sensitive to everything else nearby.</li>
+          <li>The central challenge: separating a genuine dark-matter-like recoil from ordinary radioactive background.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Neutrons as a dark-matter stand-in</h3>
+        <ul>
+          <li>Dark matter is expected to scatter off atomic nuclei — a nuclear recoil.</li>
+          <li>Neutrons produce the same kind of nuclear recoil, making them the standard laboratory proxy for dark matter signals.</li>
+          <li>Gamma-rays instead scatter off electrons, producing a different acoustic signature that forms the main background.</li>
+          <li>Reliable neutron/gamma discrimination is therefore a direct proxy for validating dark-matter search sensitivity.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="pipeline" style="border-top:1px solid var(--line); background:var(--bg-1);">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">02</span><h2>From raw pulse to prediction</h2></div>
+    <div class="pipeline" id="pipelineSteps"></div>
+  </div>
+</section>
+
+<section class="section" id="distribution">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">03</span><h2>Spectral separation between classes</h2></div>
+    <p style="margin-bottom:18px; max-width:680px;">Mean STFT feature value at each frequency bin, averaged across every event of each class. Gamma events concentrate almost all their spectral energy at DC; neutron recoils show a distinct ~20–40 kHz shoulder. The pattern holds independently in the train and test partitions — the separation isn't an artifact of the split.</p>
+    <div class="chart-card">
+      <div class="mini-head"><span>MEAN FEATURE VALUE vs FREQUENCY</span><span id="distToggleLabel">TRAIN SET</span></div>
+      <canvas id="distChart" width="1080" height="280"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--neutron)"></span>Neutron</span>
+        <span><span class="sw" style="background:var(--gamma)"></span>Gamma</span>
+        <button id="distToggleBtn" style="margin-left:auto; background:var(--bg-2); border:1px solid var(--line); color:var(--text-dim); font-family:var(--f-mono); font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;">Show test set →</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="live" style="border-top:1px solid var(--line); background:var(--bg-1);">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">04</span><h2>Live classifier</h2></div>
+    <p style="margin-bottom:20px; max-width:680px;">Drop in a raw <code style="font-family:var(--f-mono); background:var(--bg-2); padding:1px 6px; border-radius:4px;">.lvm</code> waveform and this page runs the exact pipeline above — normalization, pulse localization, STFT, 512-D feature extraction — entirely in your browser, then scores it with the actual trained LR and SVM weights. Nothing is uploaded anywhere.</p>
+    <div class="scope-panel">
+      <div id="dropZone" style="border:1.5px dashed var(--line); border-radius:9px; padding:26px; text-align:center; cursor:pointer; transition:border-color .15s;">
+        <input type="file" id="fileInput" accept=".lvm,.txt" style="display:none;">
+        <div style="font-family:var(--f-mono); font-size:13px; color:var(--text-dim);" id="dropLabel">
+          Click to choose a .lvm file, or drag one here — try any file from your Neutron/ or Gamma/ folder.
+        </div>
+      </div>
+      <div id="liveError" style="display:none; margin-top:12px; font-family:var(--f-mono); font-size:12.5px; color:var(--bad); background:rgba(255,107,122,0.08); border:1px solid rgba(255,107,122,0.3); padding:10px 14px; border-radius:8px;"></div>
+
+      <div id="liveResults" style="display:none; margin-top:20px;">
+        <div class="scope-grid">
+          <div>
+            <div class="mini-head"><span>RAW WAVEFORM</span><span id="liveCropLabel">crop —</span></div>
+            <div class="mini-scope"><canvas id="liveWaveCanvas" width="520" height="180"></canvas></div>
+          </div>
+          <div>
+            <div class="mini-head"><span>SHORT-TIME ENERGY</span><span>θ = 0.15</span></div>
+            <div class="mini-scope"><canvas id="liveSteCanvas" width="520" height="180"></canvas></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;">
+          <div class="mini-head"><span>STFT SPECTROGRAM</span><span>0–500 kHz</span></div>
+          <div class="mini-scope"><canvas id="liveSpecCanvas" width="1080" height="170"></canvas></div>
+        </div>
+        <div class="predict-row">
+          <div class="pred-card">
+            <div class="model">Logistic Regression</div>
+            <div class="out" id="liveLrOut"></div>
+            <div class="conf" id="liveLrConf"></div>
+          </div>
+          <div class="pred-card">
+            <div class="model">Linear SVM</div>
+            <div class="out" id="liveSvmOut"></div>
+            <div class="conf" id="liveSvmConf"></div>
+          </div>
+        </div>
+        <div class="truth" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span>Know the true label? <span id="liveFileName" style="color:var(--text)"></span></span>
+          <select id="liveTruthSelect" style="background:var(--bg-2); color:var(--text-dim); border:1px solid var(--line); border-radius:6px; font-family:var(--f-mono); font-size:11px; padding:3px 8px;">
+            <option value="">Unknown</option>
+            <option value="Neutron">Neutron</option>
+            <option value="Gamma">Gamma</option>
+          </select>
+          <span id="liveAccuracyNote"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="explorer" style="border-top:1px solid var(--line);">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">05</span><h2>Sample event library</h2></div>
+    <p style="margin-bottom:20px; max-width:680px;">Pick any of 20 sample events (10 neutron, 10 gamma) pulled from across the train/val/test split. Each panel is computed from that event's actual waveform — pulse localization, STFT spectrogram, and both trained classifiers' live predictions.</p>
+    <div class="explorer">
+      <div class="event-list" id="eventList"></div>
+      <div class="scope-panel">
+        <div class="scope-grid">
+          <div>
+            <div class="mini-head"><span>RAW WAVEFORM</span><span id="cropLabel">crop —</span></div>
+            <div class="mini-scope"><canvas id="waveCanvas" width="520" height="180"></canvas></div>
+          </div>
+          <div>
+            <div class="mini-head"><span>SHORT-TIME ENERGY</span><span>θ = 0.15</span></div>
+            <div class="mini-scope"><canvas id="steCanvas" width="520" height="180"></canvas></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;">
+          <div class="mini-head"><span>STFT SPECTROGRAM (cropped window)</span><span>0–500 kHz</span></div>
+          <div class="mini-scope"><canvas id="specCanvas" width="1080" height="170"></canvas></div>
+        </div>
+        <div class="predict-row">
+          <div class="pred-card">
+            <div class="model">Logistic Regression</div>
+            <div class="out" id="lrOut"></div>
+            <div class="conf" id="lrConf"></div>
+          </div>
+          <div class="pred-card">
+            <div class="model">Linear SVM</div>
+            <div class="out" id="svmOut"></div>
+            <div class="conf" id="svmConf"></div>
+          </div>
+        </div>
+        <div class="truth" id="truthLine"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="models">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">06</span><h2>Model performance</h2></div>
+    <div class="chart-card" style="margin-bottom:20px;">
+      <div class="mini-head"><span>TRAINING LOSS vs ITERATION</span><span>30,000 epochs · SGD, invscaling lr</span></div>
+      <canvas id="lossChart" width="1080" height="260"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--neutron)"></span>LR — log-loss</span>
+        <span><span class="sw" style="background:var(--gamma)"></span>SVM — hinge-loss</span>
+      </div>
+    </div>
+    <div class="model-grid">
+      <div class="card">
+        <h3>Logistic Regression — confusion matrix (test set)</h3>
+        <table class="cm-table" id="cmLR"></table>
+      </div>
+      <div class="card">
+        <h3>Linear SVM — confusion matrix (test set)</h3>
+        <table class="cm-table" id="cmSVM"></table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3>Metrics summary — held-out test set (n = <span id="ntest"></span>)</h3>
+      <table class="metrics-table" id="metricsTable"></table>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>InDEx acoustic n/γ discrimination · RCC Institute of Information Technology, Dept. of ECE, in collaboration with Saha Institute of Nuclear Physics (DAE) · Pipeline executed on the full 200-event C₂H₂F₄ dataset · Bratati Basu, Tuhin Ghosh, Chandrima Das</p>
+  </div>
+</footer>
+
+
+<!-- Data -->
+<script src="js/sample_data.js"></script>
+<script src="js/model_weights.js"></script>
+<!-- Pipeline -->
+<script src="js/preprocessing.js"></script>
+<script src="js/model.js"></script>
+<!-- UI -->
+<script src="js/app.js"></script>
+</body>
+</html>
