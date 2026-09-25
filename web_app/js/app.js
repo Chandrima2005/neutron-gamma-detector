@@ -68,25 +68,58 @@ function lineChart(canvas, series, opts={}){
   return {X,Y,padL,padR,padT,padB,w,h};
 }
 
-/* ---------------- HERO SCOPE ---------------- */
-function findCuratedByFile(name){ return SAMPLE_DATA.curated_events.find(e=>e.file===name); }
-let heroEvt = SAMPLE_DATA.curated_events.find(e=>e.class==='Neutron') || SAMPLE_DATA.curated_events[0];
-function drawHero(){
-  const canvas = document.getElementById('heroScope');
-  const pts = heroEvt.waveform.t_ms.map((t,i)=>[t, heroEvt.waveform.amp[i]]);
-  const col = heroEvt.class==='Neutron'?COL.neutron:COL.gamma;
-  document.getElementById('heroLabel').textContent = heroEvt.class.toUpperCase();
-  document.getElementById('heroLabel').style.color = col;
-  const {X,Y,padT,padB,h} = lineChart(canvas,[{points:pts,color:col,width:1.4,glow:6}],
-    {ymin:-1.05,ymax:1.05,padT:10,padB:20,xLabel:'0 ms',xmaxLabel:'20 ms'});
+/* ---------------- HERO SIGNALS (neutron + gamma side by side) ---------------- */
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const curatedOk = cls => SAMPLE_DATA.curated_events.filter(e => e.class===cls && e.lr_pred===(cls==='Neutron'?1:0));
+const HERO = [
+  { canvasId:'heroNeutron', fileId:'heroNeutronFile', cardId:'heroNeutronCard', color:COL.neutron,
+    evt: SAMPLE_DATA.curated_events.find(e=>e.file==='scope-1_026.lvm' && e.class==='Neutron') || curatedOk('Neutron')[0] },
+  { canvasId:'heroGamma', fileId:'heroGammaFile', cardId:'heroGammaCard', color:COL.gamma,
+    evt: curatedOk('Gamma')[0] || SAMPLE_DATA.curated_events.find(e=>e.class==='Gamma') },
+];
+
+// progress 0..1: how much of the trace is drawn (for the sweep-in animation)
+function drawHeroSignal(h, progress=1){
+  const e = h.evt, canvas = document.getElementById(h.canvasId);
+  const all = e.waveform.t_ms.map((t,i)=>[t, e.waveform.amp[i]]);
+  const n = Math.max(2, Math.round(all.length*progress));
+  const xmin = all[0][0], xmax = all[all.length-1][0];
+  const {X,Y,padT,padB} = lineChart(canvas,[{points:all.slice(0,n),color:h.color,width:1.4,glow:8}],
+    {xmin,xmax,ymin:-1.05,ymax:1.05,padT:10,padB:20,xLabel:'0 ms',xmaxLabel:'20 ms'});
   const ctx = canvas.getContext('2d');
-  // crop window shading
-  const dpr = Math.min(window.devicePixelRatio||1,2);
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  const x0=X(heroEvt.crop_ms[0]), x1=X(heroEvt.crop_ms[1]);
-  ctx.fillStyle='rgba(255,194,51,0.10)';
+  const x0=X(e.crop_ms[0]), x1=X(e.crop_ms[1]);
+  ctx.fillStyle = h.color + '1f';   // ~12% alpha of the class colour
   ctx.fillRect(x0,padT,x1-x0,canvas.clientHeight-padT-padB);
+  // leading dot while sweeping
+  if (progress < 1){
+    const p = all[n-1];
+    ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 3, 0, Math.PI*2);
+    ctx.fillStyle = h.color; ctx.shadowColor = h.color; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+  }
 }
+
+function animateHeroSignal(h, duration=1600){
+  if (REDUCED_MOTION){ drawHeroSignal(h,1); return; }
+  const token = h.anim = {};
+  const t0 = performance.now();
+  const step = now => {
+    if (h.anim !== token) return;               // a newer animation took over
+    const p = Math.min(1, (now-t0)/duration);
+    drawHeroSignal(h, 1-Math.pow(1-p,3));       // ease-out
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function initHero(){
+  HERO.forEach(h=>{
+    document.getElementById(h.fileId).textContent = h.evt.file;
+    const card = document.getElementById(h.cardId);
+    card.addEventListener('mouseenter', ()=>animateHeroSignal(h, 1100));
+    animateHeroSignal(h);
+  });
+}
+function drawHero(){ HERO.forEach(h=>{ h.anim = null; drawHeroSignal(h,1); }); }
 
 /* ---------------- PIPELINE STEPS ---------------- */
 const steps = [
@@ -98,7 +131,7 @@ const steps = [
  ["06","Classify","Logistic Regression & Linear SVM, SGD-trained, 30k epochs, 7:2:1 split."],
 ];
 document.getElementById('pipelineSteps').innerHTML = steps.map(s=>`
-  <div class="pstep"><div class="pn">${s[0]}</div><h4>${s[1]}</h4><p>${s[2]}</p></div>
+  <div class="pstep glow-card reveal"><div class="pn">${s[0]}</div><h4>${s[1]}</h4><p>${s[2]}</p><span class="arrow"></span></div>
 `).join('');
 
 /* ---------------- DISTRIBUTION CHART ---------------- */
@@ -151,6 +184,9 @@ function heat(v){
 function selectEvent(id){
   document.querySelectorAll('.event-item').forEach(b=>b.classList.toggle('active', +b.dataset.id===id));
   const e = SAMPLE_DATA.curated_events.find(ev=>ev.id===id);
+  const panel = document.querySelector('#explorer .scope-panel');
+  panel.classList.toggle('is-neutron', e.class==='Neutron');
+  panel.classList.toggle('is-gamma', e.class==='Gamma');
 
   // waveform
   const wavePts = e.waveform.t_ms.map((t,i)=>[t,e.waveform.amp[i]]);
@@ -355,9 +391,50 @@ const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 dropZone.addEventListener('click', ()=> fileInput.click());
 fileInput.addEventListener('change', (e)=>{ if (e.target.files[0]) handleLiveFile(e.target.files[0]); });
-['dragover','dragenter'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.style.borderColor = 'var(--amber)'; }));
-['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.style.borderColor = 'var(--line)'; }));
+['dragover','dragenter'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.classList.remove('drag'); }));
 dropZone.addEventListener('drop', (e)=>{ const f = e.dataTransfer.files[0]; if (f) handleLiveFile(f); });
+
+/* ---------------- HOVER SPOTLIGHT, SCROLL REVEAL, COUNT-UP ---------------- */
+document.addEventListener('pointermove', (ev)=>{
+  const card = ev.target.closest && ev.target.closest('.glow-card');
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  card.style.setProperty('--mx', (ev.clientX-r.left)+'px');
+  card.style.setProperty('--my', (ev.clientY-r.top)+'px');
+});
+
+function countUp(el){
+  const target = +el.dataset.count, suffix = el.dataset.suffix || '';
+  if (REDUCED_MOTION){ el.textContent = target.toLocaleString()+suffix; return; }
+  const t0 = performance.now(), dur = 1400;
+  const step = now => {
+    const p = Math.min(1,(now-t0)/dur);
+    el.textContent = Math.round(target*(1-Math.pow(1-p,3))).toLocaleString()+suffix;
+    if (p<1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function initReveal(){
+  const els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)){ els.forEach(el=>el.classList.add('in')); return; }
+  const io = new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      if (!en.isIntersecting) return;
+      const el = en.target;
+      // stagger siblings that enter together
+      const sibs = [...el.parentElement.children].filter(c=>c.classList.contains('reveal'));
+      el.style.transitionDelay = (Math.max(0, sibs.indexOf(el))*70)+'ms';
+      el.classList.add('in');
+      setTimeout(()=>{ el.style.transitionDelay = ''; }, 1400);  // so hover isn't delayed later
+      el.querySelectorAll('[data-count]').forEach(countUp);
+      if (el.matches('[data-count]')) countUp(el);
+      io.unobserve(el);
+    });
+  }, {threshold:0.12});
+  els.forEach(el=>io.observe(el));
+}
 
 /* ---------------- INIT ---------------- */
 function renderAll(){
@@ -367,7 +444,11 @@ function renderAll(){
   cmTable('cmSVM', SAMPLE_DATA.metrics.svm.confusion_matrix);
   metricsTable();
   drawLoss();
-  selectEvent(SAMPLE_DATA.curated_events[0].id);
+  const active = document.querySelector('.event-item.active');
+  selectEvent(active ? +active.dataset.id : SAMPLE_DATA.curated_events[0].id);
 }
 renderAll();
-window.addEventListener('resize', ()=>{ renderAll(); });
+initHero();
+initReveal();
+let resizeTimer;
+window.addEventListener('resize', ()=>{ clearTimeout(resizeTimer); resizeTimer = setTimeout(renderAll, 150); });
