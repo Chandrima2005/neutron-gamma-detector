@@ -1,72 +1,72 @@
-# Neutron / Gamma Discrimination Dashboard
+# Neutron/Gamma Acoustic Discrimination — Modular Project
 
-A browser-based dashboard that tells neutron events from gamma-ray events in a C₂H₂F₄ superheated liquid detector (SLD), using only the acoustic pulse each bubble nucleation produces.
-
-Neutrons produce nuclear recoils, the same kind of interaction expected from dark matter, while gamma-rays scatter off electrons and form the main background. Their pulse amplitudes look almost identical, but their short-time Fourier spectra differ: gamma events concentrate energy near DC, while neutron events show a distinct ~20–40 kHz shoulder.
-
-**Live demo:** https://chandrima2005.github.io/neutron-gamma-detector/ *(once GitHub Pages is enabled)*
-
-## What the dashboard shows
-
-1. **Motivation:** why neutron/gamma discrimination matters for dark-matter searches.
-2. **Pipeline:** each step from raw waveform to prediction.
-3. **Spectral separation:** mean feature spectrum per class, for both the train and test sets.
-4. **Live classifier:** drop in any `.lvm` waveform and it is classified entirely in your browser. Nothing is uploaded.
-5. **Sample event library:** 20 example events with their waveform, short-time energy, spectrogram and model predictions.
-6. **Model performance:** metrics, confusion matrices and loss curves.
-
-## Pipeline
+Split into the pieces you asked for: signal preprocessing, model training,
+model inference, and the UI — each in its own file(s), on both the Python
+side and the browser side.
 
 ```
-.lvm file → parse → normalize → frame (Hanning, 1024 samples, 80% overlap)
-          → short-time energy pulse localization (θ = 0.15)
-          → STFT → per-frame normalization → average over pulse window
-          → 512-D feature vector → Logistic Regression / Linear SVM
+neutron_gamma_project/
+├── python/
+│   ├── preprocessing.py     # signal preprocessing (LVM parsing → 512-D STFT feature vector)
+│   ├── train_model.py       # trains LR + Linear SVM, exports model_weights.json / .js
+│   ├── predict.py           # applies a trained model to ONE new .lvm file (CLI)
+│   ├── model_weights.json   # already-trained weights (30,000 epochs, full dataset)
+│   └── training_report.json # accuracy / precision / recall / F1 / confusion matrices
+├── requirements.txt
+└── web_app/
+    ├── index.html            # the UI shell
+    ├── style.css              # all styling
+    └── js/
+        ├── sample_data.js     # pre-computed results for the sample gallery/charts
+        ├── model_weights.js   # same trained weights as the .json, as a JS constant
+        ├── preprocessing.js   # signal preprocessing — JS mirror of preprocessing.py
+        ├── model.js           # applies the model to a feature vector (w·x + b)
+        └── app.js              # UI logic: renders charts, wires file-upload → preprocessing.js → model.js → screen
 ```
 
-Both classifiers are linear, so inference is a single dot product `w · x + b`.
+Each file does exactly one job, and the Python and JS preprocessing files
+are line-for-line the same algorithm — verified to produce identical
+feature vectors and identical predictions on real waveform files.
 
-## Dataset
+## Using the UI (no install needed)
 
-- 200 acoustic events (100 neutron, 100 gamma), each a 20 ms window sampled at 1 MSa/s
-- 7 : 2 : 1 train / validation / test split
-- 30 raw LabVIEW `.lvm` sample files are in [`sample data/`](sample%20data/) for trying out the live classifier
+Open `web_app/index.html` in a browser (just double-click it). Scroll to
+**"Live classifier"**, drop in any `.lvm` file, and the page:
 
-## Results (test set, 20 events)
+1. `preprocessing.js` parses it and computes the 512-D feature vector
+2. `model.js` applies the trained weights (`model_weights.js`) to get a
+   prediction
+3. `app.js` draws the waveform, short-time-energy curve, spectrogram, and
+   the two models' predictions on screen
 
-| Model               | Accuracy | Neutron recall | Gamma recall |
-|---------------------|:--------:|:--------------:|:------------:|
-| Logistic Regression | 95%      | 90%            | 100%         |
-| Linear SVM          | 95%      | 90%            | 100%         |
+Everything runs locally in your browser — no server, no upload, no
+internet required.
 
-Both models were trained with SGD (inverse-scaling learning rate) for 30,000 epochs.
-
-## Running locally
-
-The project needs no build step or dependencies:
+## Retraining the model (Python side)
 
 ```bash
-git clone https://github.com/Chandrima2005/neutron-gamma-detector.git
-cd neutron-gamma-detector
+pip install -r requirements.txt
+
+python python/train_model.py --data-dir "Data_100 events" --epochs 30000
 ```
 
-Then open `index.html` in a browser. Or serve it with `python -m http.server` and visit http://localhost:8000.
+This regenerates `model_weights.json` **and** `model_weights.js` — copy
+the new `model_weights.js` into `web_app/js/` to update the UI with your
+retrained model.
 
-## Project structure
+## Running a single prediction from the command line (Python side)
 
-```
-index.html              Dashboard page
-style.css               Styles
-js/app.js               UI, charts and interactivity
-js/preprocessing.js     .lvm parser and STFT feature pipeline (mirrors the Python training code)
-js/model.js             Linear inference for LR and SVM
-js/model_weights.js     Trained model weights (auto-generated)
-js/sample_data.js       Pre-computed metrics, splits and sample events (auto-generated)
-sample data/            Raw .lvm waveform files
+```bash
+python python/predict.py --weights python/model_weights.json --input scope-1_026.lvm
 ```
 
-`model_weights.js` and `sample_data.js` were generated by a Python training script (`train_model.py`), which is not included in this repository.
+Add `--plot out.png` to also save a waveform/STE/spectrogram figure.
 
-## Acknowledgements
+## Why two copies of the pipeline (Python + JS)?
 
-The detector data comes from the InDEx experiment at the Saha Institute of Nuclear Physics.
+The UI needs to work by just opening a file in a browser — no Python, no
+server — so the same preprocessing + inference logic is re-implemented in
+JavaScript (`web_app/js/preprocessing.js`, `model.js`). They're kept
+side-by-side deliberately so you can read and compare them; if you ever
+change one (e.g. the pulse-localization threshold `THETA`), change it in
+both files.
